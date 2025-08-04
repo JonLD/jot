@@ -7,7 +7,8 @@ import (
 )
 
 type Config struct {
-	Editor string `json:"editor,omitempty"`
+	Editor           string `json:"editor,omitempty"`
+	EditorBackground bool   `json:"editor_background,omitempty"`
 }
 
 func Load() (*Config, error) {

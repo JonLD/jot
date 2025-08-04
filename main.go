@@ -20,22 +20,41 @@ func main() {
         branchNote   = flag.Bool("branch", false, "Open the note for the current branch (creates if doesn't exist)")
         fromNvim     = flag.Bool("fromnvim", false, "Called from Neovim (internal flag)")
         setEditor    = flag.String("editor", "", "Set the editor command for opening notes (e.g., 'nvim', 'code', 'open -a \"Visual Studio Code\"')")
+        editorBackground = flag.String("editor-background", "", "Set whether editor runs in background: 'true' for new window, 'false' for current terminal")
     )
     flag.Parse()
 
     // Handle setting editor config
-    if *setEditor != "" {
+    if *setEditor != "" || *editorBackground != "" {
         cfg, err := config.Load()
         if err != nil {
             log.Printf("Error loading config: %v\n", err)
             os.Exit(1)
         }
-        cfg.Editor = *setEditor
+        
+        if *setEditor != "" {
+            cfg.Editor = *setEditor
+            fmt.Printf("Editor set to: %s\n", *setEditor)
+        }
+        
+        if *editorBackground != "" {
+            switch *editorBackground {
+            case "true":
+                cfg.EditorBackground = true
+                fmt.Printf("Editor will run in background\n")
+            case "false":
+                cfg.EditorBackground = false
+                fmt.Printf("Editor will run in foreground\n")
+            default:
+                fmt.Printf("Invalid value for -editor-background. Use 'true' or 'false'\n")
+                os.Exit(1)
+            }
+        }
+        
         if err := cfg.Save(); err != nil {
             log.Printf("Error saving config: %v\n", err)
             os.Exit(1)
         }
-        fmt.Printf("Editor set to: %s\n", *setEditor)
         return
     }
 

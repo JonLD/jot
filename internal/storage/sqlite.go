@@ -399,8 +399,19 @@ func (store *SQLiteStore) Open(id string) error {
 		} else {
 			cmd = exec.Command(parts[0], note.Path)
 		}
+		
+		// Run in foreground (default) or background based on config
+		if cfg.EditorBackground {
+			return cmd.Start()
+		} else {
+			// Run in foreground (current terminal)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return cmd.Run()
+		}
 	} else {
-		// Fall back to system default
+		// Fall back to system default (always background)
 		switch runtime.GOOS {
 		case "windows":
 			cmd = exec.Command("cmd", "/c", "start", "", note.Path)
@@ -409,7 +420,6 @@ func (store *SQLiteStore) Open(id string) error {
 		default: // linux
 			cmd = exec.Command("xdg-open", note.Path)
 		}
+		return cmd.Start()
 	}
-
-	return cmd.Start()
 }
