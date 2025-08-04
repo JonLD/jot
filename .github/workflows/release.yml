@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: '1.21'
+
+    - name: Build binaries
+      run: |
+        mkdir -p dist
+        GOOS=windows GOARCH=amd64 go build -o dist/jot-windows-amd64.exe
+        GOOS=darwin GOARCH=amd64 go build -o dist/jot-darwin-amd64
+        GOOS=darwin GOARCH=arm64 go build -o dist/jot-darwin-arm64
+        GOOS=linux GOARCH=amd64 go build -o dist/jot-linux-amd64
+        GOOS=linux GOARCH=arm64 go build -o dist/jot-linux-arm64
+
+    - name: Package binaries
+      run: |
+        cd dist
+        zip jot-${{ github.ref_name }}-windows-amd64.zip jot-windows-amd64.exe
+        tar -czf jot-${{ github.ref_name }}-darwin-amd64.tar.gz jot-darwin-amd64
+        tar -czf jot-${{ github.ref_name }}-darwin-arm64.tar.gz jot-darwin-arm64
+        tar -czf jot-${{ github.ref_name }}-linux-amd64.tar.gz jot-linux-amd64
+        tar -czf jot-${{ github.ref_name }}-linux-arm64.tar.gz jot-linux-arm64
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/jot-${{ github.ref_name }}-windows-amd64.zip
+          dist/jot-${{ github.ref_name }}-darwin-amd64.tar.gz
+          dist/jot-${{ github.ref_name }}-darwin-arm64.tar.gz
+          dist/jot-${{ github.ref_name }}-linux-amd64.tar.gz
+          dist/jot-${{ github.ref_name }}-linux-arm64.tar.gz
