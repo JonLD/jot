@@ -3,9 +3,12 @@ package ui
 import (
     "log"
     "strings"
+    "os/exec"
+    "path/filepath"
+    "os"
 
-    "github.com/JonLD/scrib/internal/storage"
-    "github.com/JonLD/scrib/themes"
+    "github.com/JonLD/jot/internal/storage"
+    "github.com/JonLD/jot/themes"
 
     "github.com/charmbracelet/bubbles/textinput"
     "github.com/charmbracelet/lipgloss"
@@ -14,6 +17,43 @@ import (
 
 // Current theme TODO: add into a config file
 var currentTheme = themes.TokyoNightScheme
+
+// Helper function to get current Git branch
+func getCurrentBranch() string {
+    cmd := exec.Command("git", "branch", "--show-current")
+    output, err := cmd.Output()
+    if err != nil {
+        return "main" // fallback
+    }
+    return strings.TrimSpace(string(output))
+}
+
+// Helper function to get current Git project name
+func getCurrentProject() string {
+    // Try to get project name from git remote
+    cmd := exec.Command("git", "remote", "get-url", "origin")
+    output, err := cmd.Output()
+    if err == nil {
+        url := strings.TrimSpace(string(output))
+        // Extract project name from URL (handle both SSH and HTTPS)
+        if strings.Contains(url, "/") {
+            parts := strings.Split(url, "/")
+            projectName := parts[len(parts)-1]
+            // Remove .git suffix if present
+            projectName = strings.TrimSuffix(projectName, ".git")
+            if projectName != "" {
+                return projectName
+            }
+        }
+    }
+    
+    // Fallback to directory name
+    cwd, err := os.Getwd()
+    if err != nil {
+        return "unknown"
+    }
+    return filepath.Base(cwd)
+}
 
 var (
     primaryStyle = lipgloss.NewStyle().
@@ -42,116 +82,151 @@ var (
 )
 
 func NewModel(store storage.NoteStore) Model {
-    ti := textinput.New() // Creates the text input component
-    ti.Placeholder = "Enter note title..."
-    ti.CharLimit = 100
-    ti.Width = 40
-    ti.SetValue("")
-    ti.Focus()
+    textInput := textinput.New() // Creates the text input component
+    textInput.Placeholder = "Enter note title..."
+    textInput.CharLimit = 100
+    textInput.Width = 40
+    textInput.SetValue("")
+    textInput.Focus()
     // ti.Cursor.Style = cursorStyle
-    ti.Blur()
+    textInput.Blur()
 
     return Model{
         Store:     store,
-        InputText: ti,
+        InputText: textInput,
         ShowInput: false,
     }
 }
 
 type Model struct {
-    Store     storage.NoteStore
-    Notes     []*storage.Note
-    Cursor    int
-    ShowInput bool
-    InputText textinput.Model
+    Store             storage.NoteStore
+    Notes             []*storage.Note
+    Cursor            int
+    ShowInput         bool
+    InputText         textinput.Model
+    ShowDeleteConfirm bool
+    DeleteNoteID      string
+    DeleteNoteTitle   string
 }
 
 type notesLoadedMsg struct {
     notes []*storage.Note
 }
 
-func (m Model) Init() tea.Cmd {
+func (model Model) Init() tea.Cmd {
     return tea.Batch(
         tea.Cmd(func() tea.Msg {
-            notes, _ := m.Store.GetAll()
+            notes, _ := model.Store.GetAll()
             return notesLoadedMsg{notes}
         }),
         textinput.Blink,
         )
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (model Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     switch msg := msg.(type) {
     case tea.KeyMsg:
-        if m.ShowInput {
+        if model.ShowDeleteConfirm {
+            switch msg.String() {
+            case "y", "Y":
+                // Perform deletion
+                err := model.Store.Delete(model.DeleteNoteID)
+                if err != nil {
+                    log.Printf("Error deleting note: %v", err)
+                }
+                model.ShowDeleteConfirm = false
+                // Reload notes
+                cmd := tea.Cmd(func() tea.Msg {
+                    notes, _ := model.Store.GetAll()
+                    return notesLoadedMsg{notes}
+                })
+                return model, cmd
+            case "n", "N", "esc":
+                model.ShowDeleteConfirm = false
+                return model, nil
+            }
+            return model, nil
+        } else if model.ShowInput {
             switch msg.Type {
             case tea.KeyEnter, tea.KeyCtrlL:
-                title := m.InputText.Value()
+                title := model.InputText.Value()
                 if title != "" {
                     newNote := storage.Note{
                         Title:   title,
-                        Project: "scrib",
-                        Branch:  "main",
+                        Project: getCurrentProject(),
+                        Branch:  getCurrentBranch(),
                     }
-                    createdNote, err := m.Store.Create(newNote)
+                    createdNote, err := model.Store.Create(newNote)
                     if err != nil {
                         log.Printf("Error creating note: %v", err)
                     } else {
-                        m.Notes = append(m.Notes, createdNote)
+                        model.Notes = append(model.Notes, createdNote)
+                        // Open the newly created note
+                        if err := model.Store.Open(createdNote.ID); err != nil {
+                            log.Printf("Error opening created note: %v", err)
+                        }
                     }
                 }
-                m.ShowInput = false
-                m.InputText.Reset()
-                m.InputText.Blur()
-                return m, nil
+                model.ShowInput = false
+                model.InputText.Reset()
+                model.InputText.Blur()
+                return model, nil
             case tea.KeyCtrlC, tea.KeyEsc:
-                m.ShowInput = false
-                m.InputText.Blur()
-                m.InputText.Reset()
-                return m, nil
+                model.ShowInput = false
+                model.InputText.Blur()
+                model.InputText.Reset()
+                return model, nil
             }
             var cmd tea.Cmd
-            m.InputText, cmd = m.InputText.Update(msg)
-            return m, cmd
+            model.InputText, cmd = model.InputText.Update(msg)
+            return model, cmd
         } else {
             switch msg.String() {
             case "n":
-                m.ShowInput = true
-                return m, m.InputText.Focus()
+                model.ShowInput = true
+                return model, model.InputText.Focus()
+            case "d":
+                if len(model.Notes) > 0 && model.Cursor < len(model.Notes) {
+                    selectedNote := model.Notes[model.Cursor]
+                    // Set up confirmation dialog
+                    model.ShowDeleteConfirm = true
+                    model.DeleteNoteID = selectedNote.ID
+                    model.DeleteNoteTitle = selectedNote.Title
+                    return model, nil
+                }
             case "q", tea.KeyCtrlC.String(), tea.KeyEsc.String():
-                return m, tea.Quit
+                return model, tea.Quit
             case "j", tea.KeyDown.String():
-                if m.Cursor < len(m.Notes)-1 {
-                    m.Cursor++
+                if model.Cursor < len(model.Notes)-1 {
+                    model.Cursor++
                 }
             case "k", tea.KeyUp.String():
-                if m.Cursor > 0 {
-                    m.Cursor--
+                if model.Cursor > 0 {
+                    model.Cursor--
                 }
-            case tea.KeyCtrlL.String():
-                if len(m.Notes) > 0 && m.Cursor < len(m.Notes) {
-                    selectedNote := m.Notes[m.Cursor]
-                    // TODO: Open note in editor
-                    log.Printf("Opening note: %s", selectedNote.Title)
+            case tea.KeyCtrlL.String(), "enter":
+                if len(model.Notes) > 0 && model.Cursor < len(model.Notes) {
+                    selectedNote := model.Notes[model.Cursor]
+                    model.Store.Open(selectedNote.ID)
                 }
             }
         }
     case notesLoadedMsg:
-        m.Notes = msg.notes
+        model.Notes = msg.notes
     }
 
-    return m, nil
+    return model, nil
 }
 
-func (m Model) View() string {
+func (model Model) View() string {
     listStyle := windowStyle.
         Padding(1, 2)
 
     var listContent strings.Builder
-    listContent.WriteString(primaryStyle.Bold(true).Render("Scrib Notes") + "\n")
+    listContent.WriteString(primaryStyle.Bold(true).Render("Jot Notes") + "\n")
 
-    for i, note := range m.Notes {
-        if m.Cursor == i {
+    for i, note := range model.Notes {
+        if model.Cursor == i {
             listContent.WriteString(selectedStyle.Render("▶ "+
                 note.Title) + "\n")
         } else {
@@ -163,14 +238,14 @@ func (m Model) View() string {
     listContent.WriteString("\n" + mutedStyle.Render("Press 'n' for new note, 'q' to quit"))
     mainView := listStyle.Render(listContent.String())
 
-    if m.ShowInput {
+    if model.ShowInput {
         popupContent := popupStyle.
             Padding(1, 2).
             Width(50).
             Align(lipgloss.Center).
             Render(
             "New Note\n\n" +
-            m.InputText.View() + "\n\n" +
+            model.InputText.View() + "\n\n" +
             "Press Ctrl-l or Enter to save, Ctrl-c or Esc to cancel",
             )
 
@@ -180,5 +255,25 @@ func (m Model) View() string {
             popupContent,
             )
     }
+
+    if model.ShowDeleteConfirm {
+        confirmContent := popupStyle.
+            Padding(1, 2).
+            Width(50).
+            Align(lipgloss.Center).
+            BorderForeground(lipgloss.Color(currentTheme.ErrorFg)).
+            Render(
+            "Delete Confirmation\n\n" +
+            "Delete note '" + model.DeleteNoteTitle + "'?\n\n" +
+            "[Y]es / [N]o",
+            )
+
+        return lipgloss.Place(
+            80, 24,
+            lipgloss.Center, lipgloss.Center,
+            confirmContent,
+            )
+    }
+
     return mainView
 }

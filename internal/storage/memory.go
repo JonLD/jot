@@ -30,33 +30,7 @@ func (s *InMemoryStore) Delete(id string) error {
     return nil
 }
 
-type UpdateOption func(*Note)
-
-func WithTitle(title string) UpdateOption {
-    return func(n *Note) { n.Title = title }
-}
-
-func WithPath(path string) UpdateOption {
-    return func(n *Note) { n.Path = path }
-}
-
-func WithProject(project string) UpdateOption {
-    return func(n *Note) { n.Project = project }
-}
-
-func WithBranch(branch string) UpdateOption {
-    return func(n *Note) { n.Branch = branch }
-}
-
-func WithTicket(ticket string) UpdateOption {
-    return func(n *Note) { n.Ticket = ticket }
-}
-
-func WithTags(tags []string) UpdateOption {
-    return func(n *Note) { n.Tags = tags }
-}
-
-func (s *InMemoryStore) Edit(id string, opts ...UpdateOption) (*Note, error) {
+func (s *InMemoryStore) Update(id string, opts ...UpdateOption) (*Note, error) {
     if note, exists := s.notes[id]; exists {
         for _, opt := range opts {
             opt(note)
