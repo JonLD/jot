@@ -1,34 +1,67 @@
 package ui
 
 import (
-    "fmt"
+    "log"
+    "strings"
+
+    "github.com/JonLD/scrib/internal/storage"
+    "github.com/JonLD/scrib/themes"
 
     "github.com/charmbracelet/bubbles/textinput"
-    "github.com/JonLD/scrib/internal/storage"
     "github.com/charmbracelet/lipgloss"
     tea "github.com/charmbracelet/bubbletea"
 )
 
+// Current theme TODO: add into a config file
+var currentTheme = themes.TokyoNightScheme
+
+var (
+    primaryStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color(currentTheme.PrimaryFg))
+
+    selectedStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color(currentTheme.SelectedFg)).Bold(true)
+
+    mutedStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color(currentTheme.MutedFg))
+
+    errorStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color(currentTheme.ErrorFg))
+
+    windowStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color(currentTheme.DefaultFg)).
+        BorderForeground(lipgloss.Color(currentTheme.BorderColor)).
+        Background(lipgloss.Color(currentTheme.DefaultBg)).
+        Border(lipgloss.RoundedBorder())
+
+    popupStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color(currentTheme.DefaultFg)).
+        BorderForeground(lipgloss.Color(currentTheme.BorderColor)).
+        Background(lipgloss.Color(currentTheme.PopupBg)).
+        Border(lipgloss.RoundedBorder())
+)
+
 func NewModel(store storage.NoteStore) Model {
-    ti := textinput.New()  // Creates the text input component
+    ti := textinput.New() // Creates the text input component
     ti.Placeholder = "Enter note title..."
     ti.CharLimit = 100
     ti.Width = 40
     ti.SetValue("")
     ti.Focus()
+    // ti.Cursor.Style = cursorStyle
     ti.Blur()
 
     return Model{
-        Store:          store,
-        InputText:      ti,
+        Store:     store,
+        InputText: ti,
         ShowInput: false,
     }
 }
 
 type Model struct {
-    Store storage.NoteStore
-    Notes []*storage.Note
-    Cursor int
+    Store     storage.NoteStore
+    Notes     []*storage.Note
+    Cursor    int
     ShowInput bool
     InputText textinput.Model
 }
@@ -38,46 +71,71 @@ type notesLoadedMsg struct {
 }
 
 func (m Model) Init() tea.Cmd {
-    return tea.Cmd(func() tea.Msg {
-        notes, _ := m.Store.GetAll()
-        return notesLoadedMsg{notes}
-    })
+    return tea.Batch(
+        tea.Cmd(func() tea.Msg {
+            notes, _ := m.Store.GetAll()
+            return notesLoadedMsg{notes}
+        }),
+        textinput.Blink,
+        )
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-switch msg := msg.(type) {
-case tea.KeyMsg:
-    if m.ShowInput {
-        switch msg.String() {
-        case "enter":
-            m.ShowInput = false
-            m.InputText.Reset()
-            return m, nil
-        case "esc":
-            m.ShowInput = false
-            m.InputText.Reset()
-            return m, nil
-        }
-        inputText, cmd := m.InputText.Update(msg)
-        m.InputText = inputText
-        return m, cmd
-    } else {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        if m.ShowInput {
+            switch msg.Type {
+            case tea.KeyEnter, tea.KeyCtrlL:
+                title := m.InputText.Value()
+                if title != "" {
+                    newNote := storage.Note{
+                        Title:   title,
+                        Project: "scrib",
+                        Branch:  "main",
+                    }
+                    createdNote, err := m.Store.Create(newNote)
+                    if err != nil {
+                        log.Printf("Error creating note: %v", err)
+                    } else {
+                        m.Notes = append(m.Notes, createdNote)
+                    }
+                }
+                m.ShowInput = false
+                m.InputText.Reset()
+                m.InputText.Blur()
+                return m, nil
+            case tea.KeyCtrlC, tea.KeyEsc:
+                m.ShowInput = false
+                m.InputText.Blur()
+                m.InputText.Reset()
+                return m, nil
+            }
+            var cmd tea.Cmd
+            m.InputText, cmd = m.InputText.Update(msg)
+            return m, cmd
+        } else {
             switch msg.String() {
             case "n":
                 m.ShowInput = true
-                m.InputText.Focus()
-            case "q", "ctrl+c":
+                return m, m.InputText.Focus()
+            case "q", tea.KeyCtrlC.String(), tea.KeyEsc.String():
                 return m, tea.Quit
-            case "j", "down":
-                if m.Cursor < len(m.Notes) - 1 {
+            case "j", tea.KeyDown.String():
+                if m.Cursor < len(m.Notes)-1 {
                     m.Cursor++
                 }
-            case "k", "up":
+            case "k", tea.KeyUp.String():
                 if m.Cursor > 0 {
                     m.Cursor--
                 }
+            case tea.KeyCtrlL.String():
+                if len(m.Notes) > 0 && m.Cursor < len(m.Notes) {
+                    selectedNote := m.Notes[m.Cursor]
+                    // TODO: Open note in editor
+                    log.Printf("Opening note: %s", selectedNote.Title)
+                }
+            }
         }
-    }
     case notesLoadedMsg:
         m.Notes = msg.notes
     }
@@ -86,39 +144,41 @@ case tea.KeyMsg:
 }
 
 func (m Model) View() string {
-    s := "Scrib\n\n"
+    listStyle := windowStyle.
+        Padding(1, 2)
+
+    var listContent strings.Builder
+    listContent.WriteString(primaryStyle.Bold(true).Render("Scrib Notes") + "\n")
 
     for i, note := range m.Notes {
-        cursor := " "
         if m.Cursor == i {
-            cursor = ">"
+            listContent.WriteString(selectedStyle.Render("▶ "+
+                note.Title) + "\n")
+        } else {
+            listContent.WriteString(mutedStyle.Render("  "+
+                note.Title) + "\n")
         }
-
-            s += fmt.Sprintf("%s %s\n", cursor, note.Title)
     }
-    s += "\nPress q to quit"
+
+    listContent.WriteString("\n" + mutedStyle.Render("Press 'n' for new note, 'q' to quit"))
+    mainView := listStyle.Render(listContent.String())
 
     if m.ShowInput {
-        popupStyle := lipgloss.NewStyle().
-            Border(lipgloss.RoundedBorder()).
-            BorderForeground(lipgloss.Color("62")).
+        popupContent := popupStyle.
             Padding(1, 2).
             Width(50).
-            Align(lipgloss.Center)
-
-        popup := popupStyle.Render(
+            Align(lipgloss.Center).
+            Render(
             "New Note\n\n" +
             m.InputText.View() + "\n\n" +
-            "Press enter to save, Esc to cancel",
-        )
+            "Press Ctrl-l or Enter to save, Ctrl-c or Esc to cancel",
+            )
 
         return lipgloss.Place(
             80, 24,
             lipgloss.Center, lipgloss.Center,
-            popup,
-            lipgloss.WithWhitespaceChars(" "),
-            lipgloss.WithWhitespaceForeground(lipgloss.Color("240")),
-            ) + "\n" + s
+            popupContent,
+            )
     }
-    return s
+    return mainView
 }

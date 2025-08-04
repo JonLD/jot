@@ -16,11 +16,7 @@ func startTUI() {
     testNote2 := storage.Note{Title: "Feature planning", Project: "scrib", Branch: "feature/tui"}
     store.Create(testNote1)
     store.Create(testNote2)
-    model := ui.Model{
-        Store: store,
-        Notes: []*storage.Note{},
-        Cursor: 0,
-    }
+    model := ui.NewModel(store)
     p := tea.NewProgram(model)
     p.Run()
 }
