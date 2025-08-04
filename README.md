@@ -54,8 +54,6 @@ go build
 
 ## Usage
 
-Notes will be opened in your default editor for Markdown files.
-
 ```bash
 # Interactive TUI (default)
 jot
@@ -65,8 +63,29 @@ jot -branch
 
 # Open/create a note by title
 jot -open "Bug fix notes"
-
 ```
+
+## Configuration
+
+### Editor
+
+By default, notes open in your system's default Markdown editor. To use a specific editor:
+
+```bash
+# Set Neovim as your editor
+jot -editor "nvim"
+
+# Set VS Code
+jot -editor "code"
+
+# Set Vim
+jot -editor "vim"
+
+# macOS: Set VS Code using open command
+jot -editor "open -a 'Visual Studio Code'"
+```
+
+Configuration is saved to `~/.jot/config.json`.
 
 ## Neovim Integration
 

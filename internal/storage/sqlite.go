@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"github.com/JonLD/jot/internal/config"
 )
 
 // In your SQLiteStore initialization
@@ -380,14 +382,33 @@ func (store *SQLiteStore) Open(id string) error {
 		return err
 	}
 
+	// Load config to check for custom editor
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
 	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", note.Path)
-	case "darwin":
-		cmd = exec.Command("open", note.Path)
-	default: // linux
-		cmd = exec.Command("xdg-open", note.Path)
+
+	// Use custom editor if configured
+	if cfg.Editor != "" {
+		// Split the editor command to handle arguments
+		parts := strings.Fields(cfg.Editor)
+		if len(parts) > 1 {
+			cmd = exec.Command(parts[0], append(parts[1:], note.Path)...)
+		} else {
+			cmd = exec.Command(parts[0], note.Path)
+		}
+	} else {
+		// Fall back to system default
+		switch runtime.GOOS {
+		case "windows":
+			cmd = exec.Command("cmd", "/c", "start", "", note.Path)
+		case "darwin":
+			cmd = exec.Command("open", note.Path)
+		default: // linux
+			cmd = exec.Command("xdg-open", note.Path)
+		}
 	}
 
 	return cmd.Start()

@@ -10,6 +10,7 @@ import (
     "strings"
     "github.com/JonLD/jot/internal/storage"
     "github.com/JonLD/jot/internal/ui"
+    "github.com/JonLD/jot/internal/config"
     tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -18,8 +19,25 @@ func main() {
         openNote     = flag.String("open", "", "Open note by title or ID (creates if doesn't exist)")
         branchNote   = flag.Bool("branch", false, "Open the note for the current branch (creates if doesn't exist)")
         fromNvim     = flag.Bool("fromnvim", false, "Called from Neovim (internal flag)")
+        setEditor    = flag.String("editor", "", "Set the editor command for opening notes (e.g., 'nvim', 'code', 'open -a \"Visual Studio Code\"')")
     )
     flag.Parse()
+
+    // Handle setting editor config
+    if *setEditor != "" {
+        cfg, err := config.Load()
+        if err != nil {
+            log.Printf("Error loading config: %v\n", err)
+            os.Exit(1)
+        }
+        cfg.Editor = *setEditor
+        if err := cfg.Save(); err != nil {
+            log.Printf("Error saving config: %v\n", err)
+            os.Exit(1)
+        }
+        fmt.Printf("Editor set to: %s\n", *setEditor)
+        return
+    }
 
     // Initialize storage
     store, err := storage.NewSQLiteStore("")
