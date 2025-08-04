@@ -1,6 +1,6 @@
 # Jot
 
-A smart note-taking CLI/TUI for developers. Quickly capture and organize notes by branch, project, and ticket.
+A smart note-taking CLI/TUI written in Go. Design for developers to quickly capture and organize notes by branch, project, and ticket.
 
 ## Features
 
