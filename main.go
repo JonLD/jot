@@ -43,7 +43,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-        return runJot(store)
+        return runJot(store, ui.FilterDisplayAll)
     },
 }
 
@@ -64,6 +64,19 @@ var openCmd = &cobra.Command{
 var branchCmd = &cobra.Command{
     Use:   "branch",
     Short: "Open or create a note for the current Git branch",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        store, err := initializeApp()
+        if err != nil {
+            return err
+        }
+        handleBranchNote(store, fromNvim)
+        return nil
+    },
+}
+
+var projCmd = &cobra.Command{
+    Use:   "proj",
+    Short: "Open or create a note for the current project",
     RunE: func(cmd *cobra.Command, args []string) error {
         store, err := initializeApp()
         if err != nil {
@@ -109,7 +122,7 @@ func init() {
 	rootCmd.AddCommand(branchCmd)
 }
 
-func runJot(store storage.NoteStore) error {
+func runJot(store storage.NoteStore, filter ui.FilterFunc) error {
     // Handle config updates first
     if hasConfigFlags(configFlags) {
         if err := updateConfigFromFlags(configFlags); err != nil {
@@ -118,7 +131,7 @@ func runJot(store storage.NoteStore) error {
         fmt.Println("Configuration updated successfully")
         return nil
     }
-    startTUI(store)
+    startTUI(store, filter)
     return nil
 }
 
@@ -164,8 +177,8 @@ func updateConfigFromFlags(flags *ConfigFlags) error {
     return nil
 }
 
-func startTUI(store storage.NoteStore) {
-    model := ui.NewModel(store, ui.FilterDisplayAll)
+func startTUI(store storage.NoteStore, filter ui.FilterFunc) {
+    model := ui.NewModel(store, filter)
     p := tea.NewProgram(model)
     p.Run()
 }
@@ -227,18 +240,17 @@ func handleBranchNote(store storage.NoteStore, fromNvim bool) {
         os.Exit(1)
     }
 
-    var foundNote *storage.Note
+    var foundNotes []*storage.Note
     for _, note := range notes {
         if note.Project == project && note.Branch == branch {
-            foundNote = note
-            break
+            foundNotes = append(foundNotes, note)
         }
     }
 
     // If note doesn't exist, create it
-    if foundNote == nil {
+    if len(foundNotes) == 0 {
         note := storage.Note{
-            Title:   branch + " notes",
+            Title:   branch,
             Project: project,
             Branch:  branch,
         }
@@ -248,21 +260,30 @@ func handleBranchNote(store storage.NoteStore, fromNvim bool) {
             fmt.Fprintf(os.Stderr, "Error creating branch note: %v\n", err)
             os.Exit(1)
         }
-        foundNote = createdNote
+        foundNotes = append(foundNotes, createdNote)
     }
 
-    // Check if called from Neovim
-    if fromNvim {
-        // Inside Neovim - just output the path
-        fmt.Print(foundNote.Path)
-    } else {
-        // Outside Neovim - open with default editor
-        err := store.Open(foundNote.ID)
-        if err != nil {
-            fmt.Fprintf(os.Stderr, "Error opening note: %v\n", err)
-            os.Exit(1)
-        }
-    }
+	// If multiple notes for branch then open TUI and filter by branch
+	if len(foundNotes) > 1 {
+		runJot(store, ui.FilterByBranch)
+		return
+
+	} else { // Only one note so open it immediately
+		// Check if called from Neovim
+		if fromNvim {
+			// Just output path for jot.nvim to open
+			fmt.Print(foundNotes[0].Path)
+
+		} else {
+			// Outside Neovim - open with default editor
+			err := store.Open(foundNotes[0].ID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error opening note: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
 }
 
 // Helper function to get current Git branch

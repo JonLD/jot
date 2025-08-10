@@ -55,9 +55,10 @@ func FilterDisplayAll(notes []*storage.Note) []*storage.Note {
 
 func FilterByBranch(notes []*storage.Note) []*storage.Note {
     currentBranch := getCurrentBranch()
+    currentProject := getCurrentProject()
     var branchNotes []*storage.Note
     for _, note := range notes {
-        if note.Branch == currentBranch {
+        if note.Project == currentProject && note.Branch == currentBranch {
             branchNotes = append(branchNotes, note)
         }
     }
