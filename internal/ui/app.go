@@ -203,6 +203,24 @@ func (model Model) updateSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
         model.State = StateNormal
         model.SearchInputText.Blur()
         return model, nil
+    case tea.KeyCtrlC:
+        return model, tea.Quit
+    case tea.KeyCtrlJ:
+        if model.Cursor < len(model.Notes)-1 {
+            model.Cursor++
+        }
+        return model, nil
+    case tea.KeyCtrlK:
+        if model.Cursor > 0 {
+            model.Cursor--
+        }
+        return model, nil
+    case tea.KeyCtrlL:
+        if len(model.Notes) > 0 && model.Cursor < len(model.Notes) {
+            selectedNote := model.Notes[model.Cursor]
+            model.Store.Open(selectedNote.ID)
+        }
+        return model, nil
     }
 
     // First empty the filtered notes so can later append all matches

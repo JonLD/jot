@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Editor           string `json:"editor,omitempty"`
 	EditorBackground bool   `json:"editor_background,omitempty"`
+	DefaultMode      string `json:"default_mode,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -18,7 +19,7 @@ func Load() (*Config, error) {
 	}
 
 	configPath := filepath.Join(homeDir, ".jot", "config.json")
-	
+
 	// If config file doesn't exist, return default config
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &Config{}, nil

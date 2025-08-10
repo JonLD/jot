@@ -17,7 +17,7 @@ import (
 )
 
 // In your SQLiteStore initialization
-func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
+func NewSQLiteStore(dbPath string, cfg *config.Config) (*SQLiteStore, error) {
 	// Default to ~/.jot/notes.db if no path is provided
 	if dbPath == "" {
 		homeDir, err := os.UserHomeDir()
@@ -57,11 +57,15 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, err
 	}
 
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{
+		db: db,
+		cfg: cfg,
+	}, nil
 }
 
 type SQLiteStore struct {
 	db *sql.DB
+	cfg *config.Config
 }
 
 func (store *SQLiteStore) Create(note Note) (*Note, error) {
@@ -382,26 +386,20 @@ func (store *SQLiteStore) Open(id string) error {
 		return err
 	}
 
-	// Load config to check for custom editor
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
 	var cmd *exec.Cmd
 
 	// Use custom editor if configured
-	if cfg.Editor != "" {
+	if store.cfg.Editor != "" {
 		// Split the editor command to handle arguments
-		parts := strings.Fields(cfg.Editor)
+		parts := strings.Fields(store.cfg.Editor)
 		if len(parts) > 1 {
 			cmd = exec.Command(parts[0], append(parts[1:], note.Path)...)
 		} else {
 			cmd = exec.Command(parts[0], note.Path)
 		}
-		
+
 		// Run in foreground (default) or background based on config
-		if cfg.EditorBackground {
+		if store.cfg.EditorBackground {
 			return cmd.Start()
 		} else {
 			// Run in foreground (current terminal)
