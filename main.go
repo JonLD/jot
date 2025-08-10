@@ -56,8 +56,9 @@ var openCmd = &cobra.Command{
         if err != nil {
             return err
         }
-        handleOpenNote(store, args[0], fromNvim)
-        return nil
+		project := getCurrentProject()
+		branch := getCurrentBranch()
+        return handleOpenNote(store, args[0], project, branch, fromNvim)
     },
 }
 
@@ -69,21 +70,35 @@ var branchCmd = &cobra.Command{
         if err != nil {
             return err
         }
-        handleBranchNote(store, fromNvim)
-        return nil
+
+		if len(args) == 1 {
+            branch := getCurrentBranch()
+            project := getCurrentProject()
+			return handleOpenNote(store, args[0], project, branch, fromNvim)
+		}
+		project := getCurrentProject()
+		branch := getCurrentBranch()
+        return handleContextNote(store, project, branch, fromNvim)
     },
 }
 
-var projCmd = &cobra.Command{
-    Use:   "proj",
-    Short: "Open or create a note for the current project",
+var projectCmd = &cobra.Command{
+    Use:   "proj [note-title]",
+    Short: "Open or create a project-wide note",
+    Args:  cobra.MaximumNArgs(1),
     RunE: func(cmd *cobra.Command, args []string) error {
         store, err := initializeApp()
         if err != nil {
             return err
         }
-        handleBranchNote(store, fromNvim)
-        return nil
+
+        project := getCurrentProject()
+
+        if len(args) == 1 {
+            return handleOpenNote(store, args[0], project, "*", fromNvim)
+        }
+
+        return handleContextNote(store, project, "*", fromNvim)
     },
 }
 
@@ -120,6 +135,7 @@ func init() {
 
 	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(branchCmd)
+	rootCmd.AddCommand(projectCmd)
 }
 
 func runJot(store storage.NoteStore, filter ui.FilterFunc) error {
@@ -183,17 +199,23 @@ func startTUI(store storage.NoteStore, filter ui.FilterFunc) {
     p.Run()
 }
 
-func handleOpenNote(store storage.NoteStore, query string, fromNvim bool) {
+func handleOpenNote(
+	store storage.NoteStore,
+	query string,
+	project string,
+	branch string,
+	fromNvim bool,
+) error {
     // Try to find note by title first, then by ID
     notes, err := store.GetAll()
     if err != nil {
-        fmt.Fprintf(os.Stderr, "Error fetching notes: %v\n", err)
-        os.Exit(1)
+        return fmt.Errorf("error fetching notes: %v", err)
     }
 
     var foundNote *storage.Note
     for _, note := range notes {
-        if note.Title == query || note.ID == query {
+		matchingDetails := note.Title == query && note.Project == project && note.Branch == branch
+        if (matchingDetails) || note.ID == query {
             foundNote = note
             break
         }
@@ -203,14 +225,13 @@ func handleOpenNote(store storage.NoteStore, query string, fromNvim bool) {
     if foundNote == nil {
         note := storage.Note{
             Title:   query,
-            Project: getCurrentProject(),
-            Branch:  getCurrentBranch(),
+            Project: project,
+            Branch:  branch,
         }
 
         createdNote, err := store.Create(note)
         if err != nil {
-            fmt.Fprintf(os.Stderr, "Error creating note: %v\n", err)
-            os.Exit(1)
+            return fmt.Errorf("error creating note: %v", err)
         }
         foundNote = createdNote
     }
@@ -223,21 +244,17 @@ func handleOpenNote(store storage.NoteStore, query string, fromNvim bool) {
         // Outside Neovim - open with default editor
         err := store.Open(foundNote.ID)
         if err != nil {
-            fmt.Fprintf(os.Stderr, "Error opening note: %v\n", err)
-            os.Exit(1)
+            return fmt.Errorf( "error opening note: %v", err)
         }
     }
+	return nil
 }
 
-func handleBranchNote(store storage.NoteStore, fromNvim bool) {
-    project := getCurrentProject()
-    branch := getCurrentBranch()
-
+func handleContextNote(store storage.NoteStore, project string, branch string, fromNvim bool) error {
     // Try to find existing note for this project/branch combination
     notes, err := store.GetAll()
     if err != nil {
-        fmt.Fprintf(os.Stderr, "Error fetching notes: %v\n", err)
-        os.Exit(1)
+        return fmt.Errorf("error fetching notes: %v", err)
     }
 
     var foundNotes []*storage.Note
@@ -249,41 +266,47 @@ func handleBranchNote(store storage.NoteStore, fromNvim bool) {
 
     // If note doesn't exist, create it
     if len(foundNotes) == 0 {
+        defaultTitle := branch
+        if branch == "*" {
+            defaultTitle = project
+        }
+
         note := storage.Note{
-            Title:   branch,
+            Title:   defaultTitle,
             Project: project,
             Branch:  branch,
         }
 
         createdNote, err := store.Create(note)
         if err != nil {
-            fmt.Fprintf(os.Stderr, "Error creating branch note: %v\n", err)
-            os.Exit(1)
+            return fmt.Errorf("error creating note: %v", err)
         }
         foundNotes = append(foundNotes, createdNote)
     }
 
-	// If multiple notes for branch then open TUI and filter by branch
+	// If multiple notes then open TUI with appropriate filter
 	if len(foundNotes) > 1 {
-		runJot(store, ui.FilterByBranch)
-		return
-
+        var filter ui.FilterFunc
+        if branch == "*" {
+            filter = ui.FilterByProject
+        } else {
+            filter = ui.FilterByBranch
+        }
+		return runJot(store, filter)
 	} else { // Only one note so open it immediately
 		// Check if called from Neovim
 		if fromNvim {
 			// Just output path for jot.nvim to open
 			fmt.Print(foundNotes[0].Path)
-
 		} else {
 			// Outside Neovim - open with default editor
-			err := store.Open(foundNotes[0].ID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error opening note: %v\n", err)
-				os.Exit(1)
+			if err := store.Open(foundNotes[0].ID); err != nil {
+				return fmt.Errorf("error opening note: %v", err)
 			}
 		}
 	}
 
+    return nil
 }
 
 // Helper function to get current Git branch

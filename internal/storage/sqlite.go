@@ -77,11 +77,14 @@ func (store *SQLiteStore) Create(note Note) (*Note, error) {
 	if note.Path == "" {
 		// Create logical path: project/ticket/branch/ or project/branch/
 		var logicalPath string
-		if note.Ticket != "" {
+		if note.Branch == "*" {
+			logicalPath = filepath.Join(note.Project)
+		} else if note.Ticket != "" {
 			logicalPath = filepath.Join(note.Project, note.Ticket, note.Branch)
 		} else {
 			logicalPath = filepath.Join(note.Project, note.Branch)
 		}
+
 
 		// Get notes directory (same as database directory)
 		homeDir, err := os.UserHomeDir()
