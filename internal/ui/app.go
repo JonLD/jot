@@ -29,6 +29,59 @@ const (
     StateDeleteConfirm
 )
 
+type Model struct {
+    Store             storage.NoteStore
+    Notes             []*storage.Note
+    FilteredNotes     []*storage.Note
+    DisplayedNotes     []*storage.Note
+    CurrentFilter     FilterFunc
+    Cursor            int
+    NewNoteInputText  textinput.Model
+    SearchInputText   textinput.Model
+    State             State
+    DeleteNoteID      string
+    DeleteNoteTitle   string
+}
+
+type notesLoadedMsg struct {
+    notes []*storage.Note
+}
+
+type FilterFunc func([]*storage.Note) []*storage.Note
+
+func FilterDisplayAll(notes []*storage.Note) []*storage.Note {
+    return notes
+}
+
+func FilterByBranch(notes []*storage.Note) []*storage.Note {
+    currentBranch := getCurrentBranch()
+    var branchNotes []*storage.Note
+    for _, note := range notes {
+        if note.Branch == currentBranch {
+            branchNotes = append(branchNotes, note)
+        }
+    }
+    return branchNotes
+}
+
+func FilterByProject(notes []*storage.Note) []*storage.Note {
+    currentProject := getCurrentProject()
+    var ProjectNotes []*storage.Note
+    for _, note := range notes {
+        if note.Project == currentProject {
+            ProjectNotes = append(ProjectNotes, note)
+        }
+    }
+    return ProjectNotes
+}
+
+func (model *Model) ApplyFilter(filterFunc FilterFunc) {
+    model.CurrentFilter = filterFunc
+    model.FilteredNotes = filterFunc(model.Notes)
+    model.DisplayedNotes = model.FilteredNotes
+    model.Cursor = 0
+}
+
 // Helper function to get current Git branch
 func getCurrentBranch() string {
     cmd := exec.Command("git", "branch", "--show-current")
@@ -90,7 +143,7 @@ var (
         Border(lipgloss.RoundedBorder())
 )
 
-func NewModel(store storage.NoteStore) Model {
+func NewModel(store storage.NoteStore, filterFunc FilterFunc) Model {
     newNoteTextInput := textinput.New() // Creates the text input component
     newNoteTextInput.Placeholder = "Enter note title..."
     newNoteTextInput.CharLimit = 100
@@ -111,23 +164,8 @@ func NewModel(store storage.NoteStore) Model {
         NewNoteInputText: newNoteTextInput,
         SearchInputText: searchTextInput,
         State: StateSearch,
+        CurrentFilter: filterFunc,
     }
-}
-
-type Model struct {
-    Store             storage.NoteStore
-    Notes             []*storage.Note
-    FilteredNotes     []*storage.Note
-    Cursor            int
-    NewNoteInputText  textinput.Model
-    SearchInputText   textinput.Model
-    State             State
-    DeleteNoteID      string
-    DeleteNoteTitle   string
-}
-
-type notesLoadedMsg struct {
-    notes []*storage.Note
 }
 
 func (model Model) Init() tea.Cmd {
@@ -155,7 +193,7 @@ func (model Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         }
     case notesLoadedMsg:
         model.Notes = msg.notes
-        model.FilteredNotes = msg.notes
+        model.ApplyFilter(model.CurrentFilter)
     }
     return model, nil
 }
@@ -193,6 +231,15 @@ func (model Model) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
             selectedNote := model.Notes[model.Cursor]
             model.Store.Open(selectedNote.ID)
         }
+    case "b":
+        model.ApplyFilter(FilterByBranch)
+        return model, nil
+    case "p":
+        model.ApplyFilter(FilterByProject)
+        return model, nil
+    case "a":
+        model.ApplyFilter(FilterDisplayAll)
+        return model, nil
     }
     return model, nil
 }
@@ -221,26 +268,35 @@ func (model Model) updateSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
             model.Store.Open(selectedNote.ID)
         }
         return model, nil
+    case tea.KeyCtrlB:
+        model.ApplyFilter(FilterByBranch)
+        return model, nil
+    case tea.KeyCtrlP:
+        model.ApplyFilter(FilterByProject)
+        return model, nil
+    case tea.KeyCtrlA:
+        model.ApplyFilter(FilterDisplayAll)
+        return model, nil
     }
 
     // First empty the filtered notes so can later append all matches
-    model.FilteredNotes = nil
+    model.DisplayedNotes = nil
 
     var cmd tea.Cmd
     model.SearchInputText, cmd = model.SearchInputText.Update(msg)
     var searchQuery = model.SearchInputText.Value()
+
     if searchQuery == "" {
-        model.FilteredNotes = model.Notes
-    }
-
-    var titles []string
-    for _, note := range model.Notes {
-        titles = append(titles, note.Title)
-    }
-
-    matches := fuzzy.Find(searchQuery, titles)
-    for _, match := range matches {
-        model.FilteredNotes = append(model.FilteredNotes, model.Notes[match.Index])
+        model.DisplayedNotes = model.FilteredNotes
+    } else {
+        var titles []string
+        for _, note := range model.FilteredNotes {
+            titles = append(titles, note.Title)
+        }
+        matches := fuzzy.Find(searchQuery, titles)
+        for _, match := range matches {
+            model.DisplayedNotes = append(model.DisplayedNotes, model.FilteredNotes[match.Index])
+        }
     }
     return model, cmd
 }
@@ -336,12 +392,12 @@ func (model Model) View() string {
     // Show filtered results count if searching
     if model.SearchInputText.Value() != "" {
         countStyle := mutedStyle
-        listContent.WriteString(countStyle.Render(fmt.Sprintf("(%d/%d)", len(model.FilteredNotes), len(model.Notes))))
+        listContent.WriteString(countStyle.Render(fmt.Sprintf("(%d/%d)", len(model.DisplayedNotes), len(model.Notes))))
     }
     listContent.WriteString("\n\n")
 
 
-    for i, note := range model.FilteredNotes {
+    for i, note := range model.DisplayedNotes {
         if model.Cursor == i {
             listContent.WriteString(selectedStyle.Render("▶ "+
                 note.Title) + "\n")

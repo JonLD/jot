@@ -1,7 +1,6 @@
 package main
 
 import (
-    "flag"
     "fmt"
     "log"
     "os"
@@ -11,82 +10,162 @@ import (
     "github.com/JonLD/jot/internal/storage"
     "github.com/JonLD/jot/internal/ui"
     "github.com/JonLD/jot/internal/config"
+
+    "github.com/spf13/cobra"
     tea "github.com/charmbracelet/bubbletea"
 )
 
-func main() {
-    var (
-        openNote     = flag.String("open", "", "Open note by title or ID (creates if doesn't exist)")
-        branchNote   = flag.Bool("branch", false, "Open the note for the current branch (creates if doesn't exist)")
-        fromNvim     = flag.Bool("fromnvim", false, "Called from Neovim (internal flag)")
-        setEditor    = flag.String("editor", "", "Set the editor command for opening notes (e.g., 'nvim', 'code', 'open -a \"Visual Studio Code\"')")
-        editorBackground = flag.String("editor-background", "", "Set whether editor runs in background: 'true' for new window, 'false' for current terminal")
-    )
-    flag.Parse()
-
-    // Handle setting editor config
-    if *setEditor != "" || *editorBackground != "" {
-        cfg, err := config.Load()
-        if err != nil {
-            log.Printf("Error loading config: %v\n", err)
-            os.Exit(1)
-        }
-        
-        if *setEditor != "" {
-            cfg.Editor = *setEditor
-            fmt.Printf("Editor set to: %s\n", *setEditor)
-        }
-        
-        if *editorBackground != "" {
-            switch *editorBackground {
-            case "true":
-                cfg.EditorBackground = true
-                fmt.Printf("Editor will run in background\n")
-            case "false":
-                cfg.EditorBackground = false
-                fmt.Printf("Editor will run in foreground\n")
-            default:
-                fmt.Printf("Invalid value for -editor-background. Use 'true' or 'false'\n")
-                os.Exit(1)
-            }
-        }
-        
-        if err := cfg.Save(); err != nil {
-            log.Printf("Error saving config: %v\n", err)
-            os.Exit(1)
-        }
-        return
-    }
-
-    // Initialize storage
-    store, err := storage.NewSQLiteStore("")
-    if err != nil {
-        log.Printf("Error initializing storage: %v\n", err)
-        os.Exit(1)
-    }
-
-    // Handle CLI commands
-    if *branchNote {
-        handleBranchNote(store, *fromNvim)
-        return
-    }
-
-    if *openNote != "" {
-        handleOpenNote(store, *openNote, *fromNvim)
-        return
-    }
-
-    // Default: start TUI
-    startTUI()
+type CLIFlags struct {
+    OpenNote     string
+    BranchNote   bool
+    FromNvim     bool
 }
 
-func startTUI() {
-    store , err:= storage.NewSQLiteStore("")
-    if err != nil {
-        log.Printf("Error initializing storage: %v\n", err)
-        panic(err)
+type ConfigFlags struct {
+    Editor           string
+    EditorBackground string
+    DefaultMode      string
+}
+
+var (
+	fromNvim bool
+    cliFlags    = &CLIFlags{}
+    configFlags = &ConfigFlags{}
+	cfg *config.Config
+)
+
+var rootCmd = &cobra.Command{
+    Use:   "jot",
+    Short: "A smart note-taking CLI for developers",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        // Default action - start TUI
+		store, err := initializeApp()
+		if err != nil {
+			return err
+		}
+        return runJot(store)
+    },
+}
+
+var openCmd = &cobra.Command{
+    Use:   "open [note-title]",
+    Short: "Open or create a note by title",
+    Args:  cobra.ExactArgs(1),
+    RunE: func(cmd *cobra.Command, args []string) error {
+        store, err := initializeApp()
+        if err != nil {
+            return err
+        }
+        handleOpenNote(store, args[0], fromNvim)
+        return nil
+    },
+}
+
+var branchCmd = &cobra.Command{
+    Use:   "branch",
+    Short: "Open or create a note for the current Git branch",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        store, err := initializeApp()
+        if err != nil {
+            return err
+        }
+        handleBranchNote(store, fromNvim)
+        return nil
+    },
+}
+
+func initializeApp() (storage.NoteStore, error) {
+	store, err := storage.NewSQLiteStore("", cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error initializing storage: %w", err)
+	}
+
+	return store, nil
+}
+
+func init() {
+	var err error
+	cfg, err = config.Load()
+	if err != nil {
+		log.Printf("Error loading config, using defaults: %v\n", err)
+		cfg = &config.Config{}
+	}
+    // CLI flags
+    rootCmd.Flags().StringVarP(&cliFlags.OpenNote,
+        "open", "o", "", "Open note by title or ID")
+    rootCmd.Flags().BoolVarP(&cliFlags.BranchNote,
+        "branch", "b", false, "Open note for current branch")
+
+    // Config flags
+    rootCmd.Flags().StringVarP(&configFlags.Editor,
+        "editor", "e", "", "Set the editor command")
+    rootCmd.Flags().StringVarP(&configFlags.EditorBackground,
+        "editor-background", "", "", "Set editor background mode")
+    rootCmd.Flags().StringVarP(&configFlags.DefaultMode, "default-mode", "m", "", "Set default mode")
+
+	rootCmd.PersistentFlags().BoolVar(&fromNvim, "fromnvim", false, "Called from Neovim (internal)")
+
+	rootCmd.AddCommand(openCmd)
+	rootCmd.AddCommand(branchCmd)
+}
+
+func runJot(store storage.NoteStore) error {
+    // Handle config updates first
+    if hasConfigFlags(configFlags) {
+        if err := updateConfigFromFlags(configFlags); err != nil {
+            return fmt.Errorf("error updating config: %w", err)
+        }
+        fmt.Println("Configuration updated successfully")
+        return nil
     }
-    model := ui.NewModel(store)
+    startTUI(store)
+    return nil
+}
+
+func main() {
+    if err := rootCmd.Execute(); err != nil {
+        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        os.Exit(1)
+    }
+}
+
+func hasConfigFlags(flags *ConfigFlags) bool {
+    return flags.Editor != "" || flags.EditorBackground != "" || flags.DefaultMode != ""
+}
+
+func updateConfigFromFlags(flags *ConfigFlags) error {
+    modified := false
+
+    if flags.Editor != "" {
+        cfg.Editor = flags.Editor
+        modified = true
+    }
+
+    if flags.EditorBackground != "" {
+        if flags.EditorBackground == "true" || flags.EditorBackground == "false" {
+            cfg.EditorBackground = flags.EditorBackground == "true"
+            modified = true
+        } else {
+            return fmt.Errorf("invalid value for editor-background: %s", flags.EditorBackground)
+        }
+    }
+
+    if flags.DefaultMode != "" {
+        if flags.DefaultMode == "normal" || flags.DefaultMode == "search" {
+            cfg.DefaultMode = flags.DefaultMode
+            modified = true
+        } else {
+            return fmt.Errorf("invalid default mode: %s", flags.DefaultMode)
+        }
+    }
+    if modified {
+        return cfg.Save()
+    }
+    return nil
+}
+
+func startTUI(store storage.NoteStore) {
+    model := ui.NewModel(store, ui.FilterDisplayAll)
     p := tea.NewProgram(model)
     p.Run()
 }
