@@ -82,13 +82,11 @@ var (
     windowStyle = lipgloss.NewStyle().
         Foreground(lipgloss.Color(currentTheme.DefaultFg)).
         BorderForeground(lipgloss.Color(currentTheme.BorderColor)).
-        Background(lipgloss.Color(currentTheme.DefaultBg)).
         Border(lipgloss.RoundedBorder())
 
     popupStyle = lipgloss.NewStyle().
         Foreground(lipgloss.Color(currentTheme.DefaultFg)).
         BorderForeground(lipgloss.Color(currentTheme.BorderColor)).
-        Background(lipgloss.Color(currentTheme.PopupBg)).
         Border(lipgloss.RoundedBorder())
 )
 
@@ -295,7 +293,16 @@ func (model Model) View() string {
         Padding(1, 2)
 
     var listContent strings.Builder
-    listContent.WriteString(primaryStyle.Bold(true).Render("Jot") + "\n")
+    asciiArt := `
+  ____   ___   ______
+ |    | /   \ |      |
+ |__  ||     ||      |
+ __|  ||  O  ||_|  |_|
+/  |  ||     |  |  |
+\  `+ "`"+ `  ||     |  |  |
+ \____| \___/   |__|
+`
+    listContent.WriteString(primaryStyle.Bold(true).Render(asciiArt) + "\n")
 
     searchBarStyle := lipgloss.NewStyle().
         Foreground(lipgloss.Color(currentTheme.PrimaryFg))
