@@ -10,11 +10,16 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	_ "embed"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 	"github.com/JonLD/jot/internal/config"
 )
+
+//go:embed schema.sql
+var schemaBytes []byte
+
 
 // In your SQLiteStore initialization
 func NewSQLiteStore(dbPath string, cfg *config.Config) (*SQLiteStore, error) {
@@ -38,23 +43,10 @@ func NewSQLiteStore(dbPath string, cfg *config.Config) (*SQLiteStore, error) {
 		return nil, err
 	}
 
-	// Create table if it doesn't exist
-	schema := `
-	CREATE TABLE IF NOT EXISTS notes (
-	id TEXT PRIMARY KEY,
-	title TEXT NOT NULL,
-	path TEXT,
-	project TEXT,
-	branch TEXT,
-	ticket TEXT,
-	tags TEXT,
-	created_at DATETIME,
-	modified_at DATETIME
-	);`
-
-	_, err = db.Exec(schema)
+	// Execute embedded schema
+	_, err = db.Exec(string(schemaBytes))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute schema: %v", err)
 	}
 
 	return &SQLiteStore{

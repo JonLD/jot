@@ -1,0 +1,105 @@
+name: Sync Schema to Dependent Repositories
+
+on:
+  push:
+    paths:
+      - 'internal/storage/sqlite.go'
+      - 'internal/storage/schema.sql'
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update jot.nvim plugin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Clone the Neovim plugin repo
+          git clone https://github.com/JonLD/jot.nvim.git
+          cd jot.nvim
+
+          # Create directory if it doesn't exist
+          mkdir -p lua/jot
+
+          # Copy schema with header comment
+          echo "-- Auto-generated schema from JonLD/jot" > lua/jot/schema.sql
+          echo "-- Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> lua/jot/schema.sql
+          echo "-- Source commit: ${GITHUB_SHA}" >> lua/jot/schema.sql
+          echo "" >> lua/jot/schema.sql
+          cat ../internal/storage/schema.sql >> lua/jot/schema.sql
+
+          # Create branch and PR if changes exist
+          if ! git diff --quiet; then
+            BRANCH_NAME="auto/update-schema-$(date +%Y%m%d-%H%M%S)"
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git checkout -b "$BRANCH_NAME"
+            git add lua/jot/schema.sql
+            git commit -m "Auto-update schema from jot@${GITHUB_SHA:0:7}
+
+          Updated schema from main jot repository.
+          Source: https://github.com/JonLD/jot/commit/${GITHUB_SHA}"
+            git push origin "$BRANCH_NAME"
+
+            gh pr create \
+              --title "🤖 Auto-update database schema" \
+              --body "Automatically generated PR to sync database schema from the main jot repository.
+
+          **Source commit:** https://github.com/JonLD/jot/commit/${GITHUB_SHA}
+          **Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          This PR contains the latest schema changes and should be reviewed before merging." \
+              --head "$BRANCH_NAME" \
+              --base main
+          else
+            echo "No schema changes detected for jot.nvim"
+          fi
+
+      - name: Update mcp-jot server
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Clone the MCP server repo
+          git clone https://github.com/JonLD/mcp-jot.git
+          cd mcp-jot
+
+          # Copy schema with header comment
+          echo "-- Auto-generated schema from JonLD/jot" > schema.sql
+          echo "-- Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> schema.sql
+          echo "-- Source commit: ${GITHUB_SHA}" >> schema.sql
+          echo "" >> schema.sql
+          cat ../internal/storage/schema.sql >> schema.sql
+
+          # Create branch and PR if changes exist
+          if ! git diff --quiet; then
+            BRANCH_NAME="auto/update-schema-$(date +%Y%m%d-%H%M%S)"
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git checkout -b "$BRANCH_NAME"
+            git add schema.sql
+            git commit -m "Auto-update schema from jot@${GITHUB_SHA:0:7}
+
+          Updated schema from main jot repository.
+          Source: https://github.com/JonLD/jot/commit/${GITHUB_SHA}"
+            git push origin "$BRANCH_NAME"
+
+            gh pr create \
+              --title "🤖 Auto-update database schema" \
+              --body "Automatically generated PR to sync database schema from the main jot repository.
+
+          **Source commit:** https://github.com/JonLD/jot/commit/${GITHUB_SHA}
+          **Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          This PR contains the latest schema changes and should be reviewed before merging." \
+              --head "$BRANCH_NAME" \
+              --base main
+          else
+            echo "No schema changes detected for mcp-jot"
+          fi
